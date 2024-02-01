@@ -9,6 +9,9 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/joho/godotenv"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -17,31 +20,75 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	session, err := createSession()
-	if err != nil {
-		log.Fatalf("Failed to create SSH session: %v", err)
+	p := tea.NewProgram(initialModel())
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
 	}
-	defer session.Close()
+}
 
-	mysqlStatus := checkMySQLStatus(session)
-	if mysqlStatus == "true" {
-		fmt.Println("MySQL pid found and running. No action required.")
-	} else {
-		fmt.Println("Cannot find MySQL. Trying to restart.")
-		restartCommand := "service mysql restart"
-		restartOutput, err := session.CombinedOutput(restartCommand)
-		if err != nil {
-			log.Fatalf("Failed to restart MySQL: %v", err)
-		}
-		fmt.Println("Restart MySQL output:", string(restartOutput))
+type (
+	errMsg error
+)
 
-		restartStatus := checkMySQLStatus(session)
-		if restartStatus == "true" {
-			fmt.Println("MySQL server was down but properly restarted.")
-		} else {
-			fmt.Println("MySQL server is down and could not be restarted. Please check manually.")
-		}
+type model struct {
+	textInput   textinput.Model
+	err         error
+	mysqlStatus string
+}
+
+func initialModel() model {
+	ti := textinput.New()
+	ti.Placeholder = "You don't have to write yes if it's already running"
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 20
+
+	mysqlStatus := checkMySQLStatus()
+
+	return model{
+		textInput:   ti,
+		err:         nil,
+		mysqlStatus: mysqlStatus,
 	}
+}
+
+func (m model) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			if m.textInput.Value() == "yes" {
+				restartMySQL()
+				m.mysqlStatus = checkMySQLStatus()
+			}
+
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
+
+	case errMsg:
+		m.err = msg
+		return m, nil
+	}
+
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m model) View() string {
+	return fmt.Sprintf(
+		"Current MySQL status: %s\n\n%s\n\n%s\n\n%s",
+		m.mysqlStatus,
+		"Write yes and press enter if you want to restart MySQL:",
+		m.textInput.View(),
+		"(esc to quit)",
+	)
 }
 
 func loadEnv() error {
@@ -89,19 +136,25 @@ func createSession() (*ssh.Session, error) {
 	return session, nil
 }
 
-func checkMySQLStatus(session *ssh.Session) string {
+func checkMySQLStatus() string {
+	session, err := createSession()
+	if err != nil {
+		log.Fatalf("Failed to create SSH session: %v", err)
+	}
+	defer session.Close()
+
 	mysqlCheckCommand := `
 		pidfile=/var/run/mysqld/mysqld.pid
 		if [ -f $pidfile ]; then
 			varpid=$(cat $pidfile)
 			found=$(ps aux | awk '{print $2}' | grep -w $varpid)
 			if [ -z "$found" ]; then
-				echo "false"
+				echo "Not running"
 			else
-				echo "true"
+				echo "Running"
 			fi
 		else
-			echo "false"
+			echo "Not running"
 		fi
 	`
 
@@ -111,4 +164,19 @@ func checkMySQLStatus(session *ssh.Session) string {
 	}
 
 	return strings.TrimSpace(string(output))
+}
+
+func restartMySQL() {
+	session, err := createSession()
+	if err != nil {
+		log.Fatalf("Failed to create SSH session: %v", err)
+	}
+	defer session.Close()
+
+	restartCommand := "service mysql restart"
+
+	_, err = session.CombinedOutput(restartCommand)
+	if err != nil {
+		log.Fatalf("Failed to restart MySQL: %v", err)
+	}
 }
