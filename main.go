@@ -1,9 +1,9 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -13,6 +13,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+//go:embed .env
+var envFileContent string
+var globalEnv map[string]string
+
+//go:embed .ssh/id_ed25519
+var privateKeyContent embed.FS
 
 func main() {
 	err := loadEnv()
@@ -92,20 +99,21 @@ func (m model) View() string {
 }
 
 func loadEnv() error {
-	err := godotenv.Load()
+	env, err := godotenv.Unmarshal(envFileContent)
 	if err != nil {
 		return err
 	}
+	globalEnv = env
 	return nil
 }
 
 func createSession() (*ssh.Session, error) {
-	server := os.Getenv("SERVER_URL")
+	server := globalEnv["SERVER_URL"]
 	port := 22
 	user := "root"
 	privateKeyPath := ".ssh/id_ed25519"
 
-	key, err := os.ReadFile(privateKeyPath)
+	key, err := privateKeyContent.ReadFile(privateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load private key: %v", err)
 	}
