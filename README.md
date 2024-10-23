@@ -2,7 +2,6 @@
 
 ## Introduction
 This program is designed to manage MySQL service remotely through SSH. It provides functionalities to check the current status of MySQL and restart it if needed. It is made in Go with [bubbletea](https://github.com/charmbracelet/bubbletea) for interactive text input handling.
-More details on why it is implemented [on my dev blog](https://byte-sized.fun/blog/restart-remote-mysql-server-with-go/)
 
 
 ## Features
